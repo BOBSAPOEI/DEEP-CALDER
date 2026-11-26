@@ -3,6 +3,8 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { createMegalodon } from "@/lib/megalodon";
+import { abyss } from "@/lib/abyssState";
 
 /**
  * The dive: a fixed WebGL layer. Scroll progress moves the camera down a column of
@@ -133,7 +135,8 @@ export function Ocean() {
     const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     scene.environment = env;
 
-    scene.add(new THREE.AmbientLight(0x6f8fb8, 0.6));
+    const ambient = new THREE.AmbientLight(0x6f8fb8, 0.6);
+    scene.add(ambient);
     const sun = new THREE.DirectionalLight(0xdfeaff, 2.4);
     sun.position.set(-4, 12, 6);
     scene.add(sun);
@@ -228,6 +231,18 @@ export function Ocean() {
       rocks.push({ m, spin: 0.1 + Math.random() * 0.2 });
     });
 
+    // The megalodon: circles in the midnight zone, sweeping close past the viewer
+    const shark = createMegalodon(mobile ? 11 : 15);
+    scene.add(shark.root);
+    const ZONE_TOP = -0.34 * DEPTH;
+    const ZONE_BOT = -0.9 * DEPTH;
+    let sharkY = ZONE_TOP - 30;
+    let theta = Math.PI; // start far behind, on the left
+    const ahead = new THREE.Vector3();
+    // a cold "diver's torch" so the shark reads in the dark
+    const torch = new THREE.PointLight(0xbcd6ff, 0, 60, 1.2);
+    scene.add(torch);
+
     // State
     let target = 0;
     let current = 0;
@@ -292,6 +307,33 @@ export function Ocean() {
         r.m.rotation.x += r.spin * dt;
         r.m.rotation.y += r.spin * 0.7 * dt;
       }
+      // Megalodon path: an ellipse whose near edge passes ~8 units in front of the camera
+      const zoneY = Math.min(ZONE_TOP, Math.max(ZONE_BOT, camera.position.y));
+      sharkY += (zoneY - 1.5 - sharkY) * (1 - Math.pow(0.2, dt));
+      const prox0 = abyss.threat;
+      theta += dt * (0.32 + prox0 * 0.25) * (reduced ? 0.4 : 1);
+      const sx = Math.cos(theta) * 26;
+      const sz = -12 + Math.sin(theta) * 17;
+      const sy = sharkY + Math.sin(theta * 2) * 2.5;
+      shark.root.position.set(sx, sy, sz);
+      ahead.set(-Math.sin(theta) * 26, Math.cos(theta * 2) * 5, Math.cos(theta) * 17).normalize();
+      shark.root.lookAt(ahead.add(shark.root.position));
+      shark.root.rotateZ(-Math.cos(theta) * 0.25); // bank into the turn
+      const dist = shark.root.position.distanceTo(camera.position);
+      const threat = THREE.MathUtils.clamp(1 - (dist - 9) / 18, 0, 1);
+      shark.update(dt, threat, THREE.MathUtils.smoothstep(threat, 0.15, 0.7));
+      ambient.intensity = 0.6 * (1 - p * 0.55) * (1 - threat * 0.5);
+      rim.intensity = 30 * (1 - threat * 0.85);
+      abyss.depth = p;
+      abyss.threat = threat;
+      torch.position.copy(camera.position);
+      torch.intensity = THREE.MathUtils.smoothstep(p, 0.25, 0.45) * 16;
+      if (threat > 0.5 && !reduced) {
+        const k = (threat - 0.5) * 0.18;
+        camera.position.x += (Math.random() - 0.5) * k;
+        camera.position.y += (Math.random() - 0.5) * k;
+      }
+
       rim.position.y = camera.position.y - 2;
       sun.intensity = 2.4 * Math.max(0.15, 1 - p * 3);
       (scene.fog as THREE.FogExp2).color.setRGB(0.008, 0.02 * (1 - p), 0.047 * (1 - p * 0.8));
@@ -317,6 +359,9 @@ export function Ocean() {
         if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
         else mat?.dispose();
       });
+      shark.dispose();
+      abyss.depth = 0;
+      abyss.threat = 0;
       env.dispose();
       pmrem.dispose();
       renderer.dispose();
