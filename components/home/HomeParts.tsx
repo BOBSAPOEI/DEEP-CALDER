@@ -10,9 +10,9 @@ export function Hero() {
   const { loaded } = useSite();
   return (
     <section className={`hero ${loaded ? "is-in" : ""}`} aria-labelledby="hero-line">
-      <div className="hero-mark" aria-hidden="true">
+      <div className="hero-mark" aria-hidden="true" style={{ display: "flex", alignItems: "flex-start" }}>
         Calder
-        <Image className="hero-logo" src="/calder-mark.png" alt="" width={732} height={811} priority />
+        <Image className="hero-logo" src="/calder-mark.png" alt="" width={732} height={811} priority style={{ width: "0.34em", height: "auto", flex: "none" }} />
       </div>
       <div className="hero-tag">
         <p className="hero-kick">{HERO.kicker}</p>

@@ -55,7 +55,7 @@ export function Header() {
       <header className="site-header">
         <div className="hdr-left">
           <Link href="/" className={`site-logo ${pastHero ? "is-on" : ""}`} aria-label="Calder — home">
-            <Image src="/calder-mark.png" alt="" width={20} height={22} />
+            <Image src="/calder-mark.png" alt="" width={20} height={22} style={{ width: 20, height: "auto" }} />
             Calder
           </Link>
           <button
@@ -72,7 +72,8 @@ export function Header() {
         </div>
 
         <button type="button" className="capsule" onClick={onCapsule}>
-          <span>{atEnd ? "Your project starts here →" : "Your project starts at 4,800 m ↓"}</span>
+          <span className="capsule-long">{atEnd ? "Your project starts here →" : "Your project starts at 4,800 m ↓"}</span>
+          <span className="capsule-short">{atEnd ? "Start your project →" : "Dive to 4,800 m ↓"}</span>
           <i className="capsule-bar" style={{ transform: `scaleX(${home ? p : 1})` }} />
         </button>
 

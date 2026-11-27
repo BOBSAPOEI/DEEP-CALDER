@@ -334,7 +334,7 @@ export function Ocean() {
       abyss.depth = p;
       abyss.threat = threat;
       torch.position.copy(camera.position);
-      torch.intensity = THREE.MathUtils.smoothstep(p, 0.25, 0.45) * 16;
+      torch.intensity = THREE.MathUtils.smoothstep(p, 0.12, 0.4) * 9 * (1 - abyss.threat * 0.5);
       if (threat > 0.5 && !reduced) {
         const k = (threat - 0.5) * 0.18;
         camera.position.x += (Math.random() - 0.5) * k;

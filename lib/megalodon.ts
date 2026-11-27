@@ -49,7 +49,7 @@ function skinTextures() {
 
   const back = [27, 34, 41];
   const flank = [50, 60, 70];
-  const belly = [150, 156, 158];
+  const belly = [118, 124, 128];
   for (let y = 0; y < H; y++) {
     // v runs around the body: 0.25 = top (back), 0.75 = belly
     const v = y / H;
@@ -212,7 +212,7 @@ export function createMegalodon(L = 14) {
       sheen: 0.4,
       sheenRoughness: 0.6,
       sheenColor: new THREE.Color("#5f7a8f"),
-      envMapIntensity: 0.4,
+      envMapIntensity: 0.25,
     }),
   );
   body.add(new THREE.Mesh(bodyGeo, skin));
