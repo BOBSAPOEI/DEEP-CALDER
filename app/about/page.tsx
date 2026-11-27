@@ -4,7 +4,7 @@ import Link from "next/link";
 import { AboutReveal, AboutCta } from "./AboutClient";
 
 export const metadata: Metadata = {
-  title: "About — Samana Studio",
+  title: "About — Calder",
   description: "We’re a small studio building websites that feel like places.",
 };
 
@@ -58,13 +58,13 @@ export default function AboutPage() {
           Company origins
         </h2>
         <p className="ab-t" style={col("7/10")} data-reveal>
-          Samana Studio was founded on one conviction: a website can be somewhere you go, not just something you read. We started building sites the way films are made, from a single image of how they should feel, followed all the way down. That idea is still the first thing we bring to every project.
+          Calder was founded on one conviction: a website can be somewhere you go, not just something you read. We started building sites the way films are made, from a single image of how they should feel, followed all the way down. That idea is still the first thing we bring to every project.
         </p>
         <p className="ab-t" style={col("10/13")} data-reveal>
-          Samana designs and builds immersive websites for brands that want a first visit to be remembered. We design and code every frame ourselves: real-time 3D, motion and sound. We take on only a few projects a year, so each one gets the whole studio, from the first sketch to the last transition.
+          Calder designs and builds immersive websites for brands that want a first visit to be remembered. We design and code every frame ourselves: real-time 3D, motion and sound. We take on only a few projects a year, so each one gets the whole studio, from the first sketch to the last transition.
         </p>
         <p className="ab-ts ab-cap" style={col("5/7")}>
-          <b>Founder &amp; Creative Director:</b> Álvaro Rodríguez
+          <b>Calder</b> — immersive web studio
         </p>
         <div className="ab-fr" style={{ ...col("7/13"), aspectRatio: "3/2" }} data-reveal>
           <Image src="/about/about-01-origins.webp" alt="A desk by a tall window, with a desktop computer, a laptop and two cups of coffee in the sun" fill sizes="(max-width: 640px) 100vw, 50vw" />
@@ -95,14 +95,14 @@ export default function AboutPage() {
 
       <section className="ab-team" aria-labelledby="ab-team">
         <h2 className="ab-team-t" id="ab-team" data-reveal>
-          The Samana Studio creative team
+          The Calder creative team
         </h2>
         <div className="ab-fm" data-reveal>
           <Image src="/about/about-03-team.webp" alt="The team at work in the studio: one leaning back in a chair, one at a monitor, one perched on a desk with a coffee" fill sizes="100vw" />
         </div>
         <div className="ab-g ab-tm">
           <ul className="ab-t ab-names" style={col("4/8")} aria-label="The team">
-            <li>Álvaro Rodríguez</li>
+            <li>Calder Studio</li>
           </ul>
           <div className="ab-cols" style={col("8/11")}>
             <p className="ab-t" data-reveal>

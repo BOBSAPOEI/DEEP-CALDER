@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -45,6 +46,7 @@ export function Header() {
 
   const onCapsule = () => {
     if (atEnd) openContact();
+    else if (window.__lenis) window.__lenis.scrollTo(document.documentElement.scrollHeight, { duration: 6 });
     else window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
   };
 
@@ -52,8 +54,9 @@ export function Header() {
     <>
       <header className="site-header">
         <div className="hdr-left">
-          <Link href="/" className={`site-logo ${pastHero ? "is-on" : ""}`} aria-label="Samana — home">
-            Samana<sup>®</sup>
+          <Link href="/" className={`site-logo ${pastHero ? "is-on" : ""}`} aria-label="Calder — home">
+            <Image src="/calder-mark.png" alt="" width={20} height={22} />
+            Calder
           </Link>
           <button
             type="button"

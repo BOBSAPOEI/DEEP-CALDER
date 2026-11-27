@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { HERO, SITE } from "@/lib/content";
 import { useSite } from "../SiteProvider";
 import { useReveal } from "../useScroll";
@@ -10,12 +11,13 @@ export function Hero() {
   return (
     <section className={`hero ${loaded ? "is-in" : ""}`} aria-labelledby="hero-line">
       <div className="hero-mark" aria-hidden="true">
-        Samana<sup>®</sup>
+        Calder
+        <Image className="hero-logo" src="/calder-mark.png" alt="" width={732} height={811} priority />
       </div>
       <div className="hero-tag">
         <p className="hero-kick">{HERO.kicker}</p>
         <h1 className="hero-line" id="hero-line">
-          <span className="sr-only">Samana — </span>
+          <span className="sr-only">Calder — </span>
           {HERO.line}
         </h1>
       </div>
@@ -50,7 +52,7 @@ export function Manifesto() {
         we are
       </div>
       <h2 className="we-are-title" id="we-are-t" data-reveal>
-        We Are Samana
+        We Are Calder
       </h2>
       {MANIFESTO.map((block, i) => (
         <div className="mf-block" key={i}>
@@ -97,7 +99,7 @@ export function Finale() {
         Start your project <span aria-hidden="true">→</span>
       </button>
       <footer className="site-footer">
-        © 2026 Samana Studio
+        © 2026 Calder
         {SITE.legal.map((l) => (
           <span key={l}>
             {" · "}

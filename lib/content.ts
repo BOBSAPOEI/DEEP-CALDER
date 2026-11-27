@@ -1,9 +1,9 @@
 export const SITE = {
-  name: "Samana Studio",
-  email: "info@samanastudio.es",
+  name: "Calder",
+  email: "hello@calder.studio" /* TODO: ganti dengan email asli */,
   socials: [
-    { label: "Instagram", href: "https://instagram.com/samanastudios" },
-    { label: "TikTok", href: "https://tiktok.com/@samanastudio" },
+    { label: "Instagram", href: "https://instagram.com/" /* TODO */ },
+    { label: "TikTok", href: "https://tiktok.com/" /* TODO */ },
   ],
   legal: ["Legal notice", "Privacy", "Cookies", "Credits"],
 };
@@ -20,7 +20,7 @@ export const CHAPTERS = [
     phrases: ["Design and code, under one roof.", "No templates. No handoffs.", "Small by choice."],
     teasers: ["who we are", "how we work", "why so few"],
     long: [
-      "Samana is an immersive web studio. We design and build websites that use 3D, motion and light the way film uses a camera — to make people feel something before they read a word.",
+      "Calder is an immersive web studio. We design and build websites that use 3D, motion and light the way film uses a camera — to make people feel something before they read a word.",
       "Art direction and engineering share the same table, from the first sketch to the last frame. Nothing gets lost in a handoff, because there isn't one.",
       "We take on a small number of brands each year. Not a production line — a studio that knows your project by heart and answers for every detail.",
     ],

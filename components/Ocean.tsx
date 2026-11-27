@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { createMegalodon } from "@/lib/megalodon";
 import { abyss } from "@/lib/abyssState";
 
@@ -41,7 +42,9 @@ const snowVert = /* glsl */ `
   attribute float aSeed;
   varying float vAlpha;
   varying float vDeep;
+  varying float vSeed;
   void main() {
+    vSeed = aSeed;
     vec3 p = position;
     p.x += sin(uTime * 0.15 + aSeed * 6.28) * 0.6;
     p.y -= mod(uTime * (0.05 + aSeed * 0.12), 4.0);
@@ -57,11 +60,12 @@ const snowVert = /* glsl */ `
 const snowFrag = /* glsl */ `
   varying float vAlpha;
   varying float vDeep;
+  varying float vSeed;
   void main() {
     float d = length(gl_PointCoord - 0.5);
     float a = smoothstep(0.5, 0.0, d);
     vec3 surface = vec3(0.86, 0.92, 1.0);
-    vec3 glow = vec3(0.50, 0.84, 0.75);
+    vec3 glow = vSeed < 0.6 ? vec3(0.0, 0.94, 1.0) : (vSeed < 0.85 ? vec3(0.94, 0.24, 0.71) : vec3(0.78, 1.0, 0.24));
     vec3 col = mix(surface, glow, smoothstep(0.45, 0.9, vDeep));
     gl_FragColor = vec4(col, a * vAlpha * 0.85);
   }
@@ -85,20 +89,24 @@ const rayVert = /* glsl */ `
   void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
 `;
 
+/** Smooth organic stone / ice: a dense sphere displaced by continuous noise, with merged vertices for soft shading. */
 function rockGeometry(radius: number, detail: number, jitter: number, seed: number) {
-  const g = new THREE.IcosahedronGeometry(radius, detail);
+  let g: THREE.BufferGeometry = new THREE.IcosahedronGeometry(radius, Math.max(4, detail + 4));
+  g.deleteAttribute("normal");
+  g.deleteAttribute("uv");
+  g = mergeVertices(g);
   const pos = g.attributes.position as THREE.BufferAttribute;
-  const map = new Map<string, number>();
-  let s = seed;
-  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const o = seed * 1.37;
+  const v = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
-    const key = `${pos.getX(i).toFixed(3)},${pos.getY(i).toFixed(3)},${pos.getZ(i).toFixed(3)}`;
-    let k = map.get(key);
-    if (k === undefined) {
-      k = 1 + (rnd() - 0.5) * jitter;
-      map.set(key, k);
-    }
-    pos.setXYZ(i, pos.getX(i) * k, pos.getY(i) * k * 1.15, pos.getZ(i) * k);
+    v.fromBufferAttribute(pos, i).normalize();
+    const n =
+      Math.sin(v.x * 2.1 + o) * Math.cos(v.y * 1.7 - o) * 0.5 +
+      Math.sin(v.y * 3.3 + v.z * 2.2 + o * 2) * 0.3 +
+      Math.sin(v.z * 5.1 - v.x * 4.3 + o) * 0.12 +
+      Math.sin(v.x * 9.0 + v.y * 7.0 + o) * 0.04;
+    const k = radius * (1 + n * jitter);
+    pos.setXYZ(i, v.x * k, v.y * k * 1.15, v.z * k);
   }
   g.computeVertexNormals();
   return g;
@@ -120,7 +128,7 @@ export function Ocean() {
     } catch {
       return; // no WebGL: the CSS water stays
     }
-    const dpr = Math.min(window.devicePixelRatio, mobile ? 1.5 : 2);
+    const dpr = Math.min(window.devicePixelRatio, mobile ? 1.5 : 1.75);
     renderer.setPixelRatio(dpr);
     renderer.setClearColor(0x000000, 0);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -196,16 +204,15 @@ export function Ocean() {
         color: 0xb8cce6,
         metalness: 0.15,
         roughness: 0.22,
-        transmission: 0.35,
         thickness: 2.2,
         ior: 1.6,
         clearcoat: 1,
         clearcoatRoughness: 0.05,
-        iridescence: 0.25,
-        flatShading: true,
+        iridescence: 0.7,
+        iridescenceIOR: 1.4,
         envMapIntensity: 2.2,
         transparent: true,
-        opacity: 0.72,
+        opacity: 0.6,
       }),
     );
     crystal.position.set(0.2, -0.4, 3);
@@ -213,7 +220,7 @@ export function Ocean() {
     scene.add(crystal);
 
     // Drifting rocks along the dive
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x1b2433, roughness: 0.55, metalness: 0.4, flatShading: true });
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x1b2433, roughness: 0.6, metalness: 0.3 });
     const rocks: { m: THREE.Mesh; spin: number }[] = [];
     const rockSpots = [
       [6.5, 3.2, -1, 0.55],
@@ -234,8 +241,8 @@ export function Ocean() {
     // The megalodon: circles in the midnight zone, sweeping close past the viewer
     const shark = createMegalodon(mobile ? 11 : 15);
     scene.add(shark.root);
-    const ZONE_TOP = -0.34 * DEPTH;
-    const ZONE_BOT = -0.9 * DEPTH;
+    const ZONE_TOP = -0.16 * DEPTH;
+    const ZONE_BOT = -0.92 * DEPTH;
     let sharkY = ZONE_TOP - 30;
     let theta = Math.PI; // start far behind, on the left
     const ahead = new THREE.Vector3();
@@ -284,7 +291,7 @@ export function Ocean() {
       if (!visible) return;
       const dt = Math.min(clock.getDelta(), 0.05);
       const t = clock.elapsedTime * (reduced ? 0.2 : 1);
-      current += (target - current) * (1 - Math.pow(0.001, dt));
+      current += (target - current) * (1 - Math.pow(0.00001, dt));
       mouse.x += (mouse.tx - mouse.x) * dt * 2;
       mouse.y += (mouse.ty - mouse.y) * dt * 2;
 

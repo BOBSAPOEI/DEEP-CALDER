@@ -90,7 +90,7 @@ export function ContactDialog() {
       id="contact"
     >
       <div className="cf-scrim" onClick={closeContact} />
-      <div className="cf-panel">
+      <div className="cf-panel" data-lenis-prevent>
         <div className="cf-head">
           <p className="cf-kick">Start a project</p>
           <button type="button" className="cf-close" onClick={closeContact} aria-label="Close">
