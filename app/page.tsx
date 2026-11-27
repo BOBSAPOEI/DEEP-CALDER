@@ -6,6 +6,9 @@ export default function Home() {
   return (
     <div className="home">
       <Ocean />
+      <div className="horror" aria-hidden="true">
+        <i className="horror-grain" />
+      </div>
       <DepthMeter />
       <HomeStory />
     </div>

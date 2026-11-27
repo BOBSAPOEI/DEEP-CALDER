@@ -18,8 +18,8 @@ const COLUMN = 200; // world units of marine snow below the surface
 const SEA = [
   { at: 0, top: [0x12, 0x20, 0x3a], bot: [0x05, 0x0b, 0x18] },
   { at: 180, top: [0x0b, 0x15, 0x29], bot: [0x03, 0x07, 0x10] },
-  { at: 1500, top: [0x03, 0x06, 0x0c], bot: [0x01, 0x02, 0x05] },
-  { at: 4800, top: [0x01, 0x02, 0x04], bot: [0x00, 0x00, 0x02] },
+  { at: 1500, top: [0x03, 0x08, 0x0a], bot: [0x01, 0x03, 0x04] },
+  { at: 4800, top: [0x02, 0x06, 0x06], bot: [0x00, 0x01, 0x01] },
 ];
 function seaAt(m: number) {
   let i = 0;
@@ -271,7 +271,7 @@ export function Ocean() {
     });
 
     // The megalodon — big, circling in the abyss
-    const SHARK_L = mobile ? 20 : 30;
+    const SHARK_L = mobile ? 19 : 27;
     const shark = createMegalodon(SHARK_L);
     scene.add(shark.root);
     let sharkY = WORLD.abyssTop - 45; // waits below, rises into view on the plunge
@@ -279,7 +279,7 @@ export function Ocean() {
     const ahead = new THREE.Vector3();
     const RX = mobile ? 14 : 24;
     const RZ = mobile ? 20 : 26;
-    const CZ = mobile ? -18 : -27; // near edge of the loop passes in front of the camera
+    const CZ = mobile ? -21 : -31; // nearest pass ≈ 18 units from the lens: huge, but never blurry // near edge of the loop passes in front of the camera
 
     // State
     let current = 0;
@@ -343,7 +343,7 @@ export function Ocean() {
       }
       sun.intensity = 2.6 * Math.max(0.12, sunny);
       ambient.intensity = 0.25 + 0.45 * sunny;
-      fog.color.setRGB(0.01 * sunny, 0.03 * sunny, 0.06 * sunny + 0.004);
+      fog.color.setRGB(0.01 * sunny + 0.002, 0.03 * sunny + 0.012 * (1 - sunny), 0.06 * sunny + 0.012 * (1 - sunny));
       fog.density = 0.02 - (1 - sunny) * 0.009;
 
       // ice
@@ -392,6 +392,11 @@ export function Ocean() {
         camera.position.y += (Math.random() - 0.5) * k;
       }
 
+      // drive the CSS horror layer (vignette, grain, red pulse)
+      const rootStyle = document.documentElement.style;
+      rootStyle.setProperty("--deep", (1 - sunny).toFixed(3));
+      rootStyle.setProperty("--threat", threat.toFixed(3));
+
       const [top, bot] = seaAt(m);
       sea.style.background = `linear-gradient(180deg, ${top} 0%, ${bot} 100%)`;
 
@@ -408,6 +413,8 @@ export function Ocean() {
       shark.dispose();
       abyss.depth = 0;
       abyss.threat = 0;
+      document.documentElement.style.removeProperty("--deep");
+      document.documentElement.style.removeProperty("--threat");
       scene.traverse((o) => {
         const mm = o as THREE.Mesh;
         mm.geometry?.dispose();
