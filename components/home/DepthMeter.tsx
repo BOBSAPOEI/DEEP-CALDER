@@ -1,12 +1,13 @@
 "use client";
 
-import { MAX_DEPTH, zoneFor } from "@/lib/content";
+import { zoneFor } from "@/lib/content";
+import { depthAt } from "@/lib/dive";
 import { useScrollProgress } from "../useScroll";
 
 /** Bottom-right depth gauge: rolling digits, the zone's name and a ruler that slides with the dive. */
 export function DepthMeter() {
   const p = useScrollProgress();
-  const m = Math.round(p * MAX_DEPTH);
+  const m = Math.round(depthAt(p));
   const digits = String(m).padStart(4, "0").split("");
   const lead = digits.findIndex((d) => d !== "0");
 

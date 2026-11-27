@@ -3,35 +3,31 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { createMegalodon } from "@/lib/megalodon";
 import { abyss } from "@/lib/abyssState";
+import { WORLD, camYAt, depthAt, smooth } from "@/lib/dive";
 
 /**
- * The dive: a fixed WebGL layer. Scroll progress moves the camera down a column of
- * "marine snow"; sun shafts fade out, the water darkens toward the abyss and the
- * particles turn bioluminescent. A faceted crystal floats in front of the hero wordmark.
+ * The dive: a fixed WebGL layer driven by the dive timeline (lib/dive.ts).
+ *  - sunlight zone: sun shafts, navy water, big ice crystals with a glowing core drifting past
+ *  - the plunge to the abyss: water turns black, marine snow turns bioluminescent
+ *  - abyss: the megalodon circles the camera and sweeps close past it
  */
-const DEPTH = 220; // world units from surface to the bottom of the column
+const COLUMN = 200; // world units of marine snow below the surface
 
 const SEA = [
-  { at: 0, top: [0x0e, 0x1a, 0x31], bot: [0x03, 0x07, 0x12] },
-  { at: 0.25, top: [0x05, 0x0b, 0x18], bot: [0x01, 0x03, 0x08] },
-  { at: 1, top: [0x02, 0x04, 0x08], bot: [0x00, 0x01, 0x03] },
+  { at: 0, top: [0x12, 0x20, 0x3a], bot: [0x05, 0x0b, 0x18] },
+  { at: 180, top: [0x0b, 0x15, 0x29], bot: [0x03, 0x07, 0x10] },
+  { at: 1500, top: [0x03, 0x06, 0x0c], bot: [0x01, 0x02, 0x05] },
+  { at: 4800, top: [0x01, 0x02, 0x04], bot: [0x00, 0x00, 0x02] },
 ];
-
-function seaAt(p: number) {
-  let a = SEA[0];
-  let b = SEA[SEA.length - 1];
-  for (let i = 0; i < SEA.length - 1; i++) {
-    if (p >= SEA[i].at && p <= SEA[i + 1].at) {
-      a = SEA[i];
-      b = SEA[i + 1];
-      break;
-    }
-  }
-  const t = (p - a.at) / Math.max(1e-6, b.at - a.at);
-  const mix = (x: number[], y: number[]) => `rgb(${x.map((v, i) => Math.round(v + (y[i] - v) * t)).join(",")})`;
+function seaAt(m: number) {
+  let i = 0;
+  while (i < SEA.length - 2 && m > SEA[i + 1].at) i++;
+  const a = SEA[i];
+  const b = SEA[i + 1];
+  const t = Math.min(1, Math.max(0, (m - a.at) / (b.at - a.at)));
+  const mix = (x: number[], y: number[]) => `rgb(${x.map((v, k) => Math.round(v + (y[k] - v) * t)).join(",")})`;
   return [mix(a.top, b.top), mix(a.bot, b.bot)];
 }
 
@@ -53,10 +49,9 @@ const snowVert = /* glsl */ `
     gl_Position = projectionMatrix * mv;
     gl_PointSize = aSize * uPixel * (24.0 / -mv.z);
     vAlpha = 0.35 + 0.65 * abs(sin(uTime * (0.6 + aSeed) + aSeed * 10.0));
-    vDeep = clamp(-position.y / ${DEPTH.toFixed(1)}, 0.0, 1.0);
+    vDeep = clamp(-position.y / ${COLUMN.toFixed(1)}, 0.0, 1.0);
   }
 `;
-
 const snowFrag = /* glsl */ `
   varying float vAlpha;
   varying float vDeep;
@@ -66,11 +61,15 @@ const snowFrag = /* glsl */ `
     float a = smoothstep(0.5, 0.0, d);
     vec3 surface = vec3(0.86, 0.92, 1.0);
     vec3 glow = vSeed < 0.6 ? vec3(0.0, 0.94, 1.0) : (vSeed < 0.85 ? vec3(0.94, 0.24, 0.71) : vec3(0.78, 1.0, 0.24));
-    vec3 col = mix(surface, glow, smoothstep(0.45, 0.9, vDeep));
+    vec3 col = mix(surface, glow, smoothstep(0.55, 0.85, vDeep));
     gl_FragColor = vec4(col, a * vAlpha * 0.85);
   }
 `;
 
+const rayVert = /* glsl */ `
+  varying vec2 vUv;
+  void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+`;
 const rayFrag = /* glsl */ `
   uniform float uTime;
   uniform float uOpacity;
@@ -84,32 +83,40 @@ const rayFrag = /* glsl */ `
   }
 `;
 
-const rayVert = /* glsl */ `
-  varying vec2 vUv;
-  void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-`;
-
-/** Smooth organic stone / ice: a dense sphere displaced by continuous noise, with merged vertices for soft shading. */
-function rockGeometry(radius: number, detail: number, jitter: number, seed: number) {
-  let g: THREE.BufferGeometry = new THREE.IcosahedronGeometry(radius, Math.max(4, detail + 4));
-  g.deleteAttribute("normal");
-  g.deleteAttribute("uv");
-  g = mergeVertices(g);
+/** Faceted ice: a low-poly sphere with per-vertex jitter, stretched along one axis. */
+function crystalGeometry(r: number, seed: number, stretch: number) {
+  const g = new THREE.IcosahedronGeometry(r, 1);
   const pos = g.attributes.position as THREE.BufferAttribute;
-  const o = seed * 1.37;
-  const v = new THREE.Vector3();
+  const map = new Map<string, number>();
+  let s = seed;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
   for (let i = 0; i < pos.count; i++) {
-    v.fromBufferAttribute(pos, i).normalize();
-    const n =
-      Math.sin(v.x * 2.1 + o) * Math.cos(v.y * 1.7 - o) * 0.5 +
-      Math.sin(v.y * 3.3 + v.z * 2.2 + o * 2) * 0.3 +
-      Math.sin(v.z * 5.1 - v.x * 4.3 + o) * 0.12 +
-      Math.sin(v.x * 9.0 + v.y * 7.0 + o) * 0.04;
-    const k = radius * (1 + n * jitter);
-    pos.setXYZ(i, v.x * k, v.y * k * 1.15, v.z * k);
+    const key = `${pos.getX(i).toFixed(3)},${pos.getY(i).toFixed(3)},${pos.getZ(i).toFixed(3)}`;
+    let k = map.get(key);
+    if (k === undefined) {
+      k = 0.78 + rnd() * 0.42;
+      map.set(key, k);
+    }
+    pos.setXYZ(i, pos.getX(i) * k, pos.getY(i) * k * stretch, pos.getZ(i) * k);
   }
   g.computeVertexNormals();
   return g;
+}
+
+/** Soft white "cloud" caught inside the ice. */
+function glowTexture() {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d")!;
+  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grd.addColorStop(0, "rgba(255,255,255,0.95)");
+  grd.addColorStop(0.35, "rgba(225,235,255,0.55)");
+  grd.addColorStop(1, "rgba(200,220,255,0)");
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 export function Ocean() {
@@ -120,7 +127,7 @@ export function Ocean() {
     const canvas = canvasRef.current!;
     const sea = seaRef.current!;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const mobile = window.matchMedia("(pointer: coarse)").matches;
+    const mobile = window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 700;
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -135,8 +142,9 @@ export function Ocean() {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x02050c, 0.018);
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+    const fog = new THREE.FogExp2(0x02050c, 0.02);
+    scene.fog = fog;
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 260);
     camera.position.set(0, 0, 14);
 
     const pmrem = new THREE.PMREMGenerator(renderer);
@@ -145,22 +153,30 @@ export function Ocean() {
 
     const ambient = new THREE.AmbientLight(0x6f8fb8, 0.6);
     scene.add(ambient);
-    const sun = new THREE.DirectionalLight(0xdfeaff, 2.4);
+    const sun = new THREE.DirectionalLight(0xdfeaff, 2.6);
     sun.position.set(-4, 12, 6);
     scene.add(sun);
-    const rim = new THREE.PointLight(0x7fd6c0, 30, 30);
-    rim.position.set(4, -2, 4);
+    const rim = new THREE.PointLight(0x00f0ff, 30, 34);
     scene.add(rim);
+    const torch = new THREE.PointLight(0xbcd6ff, 0, 90, 1.1);
+    scene.add(torch);
+    // cold light from above for the abyss, so the megalodon reads as a silhouette with lit flanks
+    const deep = new THREE.DirectionalLight(0x8fb4d8, 0);
+    deep.position.set(-6, 20, 10);
+    scene.add(deep);
+    scene.add(deep.target);
+    const sharkLight = new THREE.PointLight(0x9fc4ff, 0, 45, 1.4);
+    scene.add(sharkLight);
 
     // Marine snow
-    const COUNT = mobile ? 1600 : 3200;
+    const COUNT = mobile ? 1800 : 3600;
     const pos = new Float32Array(COUNT * 3);
     const size = new Float32Array(COUNT);
     const seed = new Float32Array(COUNT);
     for (let i = 0; i < COUNT; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 40;
-      pos[i * 3 + 1] = 8 - Math.random() * (DEPTH + 20);
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 24 - 2;
+      pos[i * 3] = (Math.random() - 0.5) * 50;
+      pos[i * 3 + 1] = 8 - Math.random() * (COLUMN + 10);
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 30 - 4;
       size[i] = Math.random() < 0.06 ? 3 + Math.random() * 3 : 0.6 + Math.random() * 1.4;
       seed[i] = Math.random();
     }
@@ -178,9 +194,9 @@ export function Ocean() {
     });
     scene.add(new THREE.Points(snowGeo, snowMat));
 
-    // Sun shafts near the surface
+    // Sun shafts (sunlight zone)
     const rays: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>[] = [];
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 8; i++) {
       const m = new THREE.ShaderMaterial({
         vertexShader: rayVert,
         fragmentShader: rayFrag,
@@ -190,73 +206,87 @@ export function Ocean() {
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
       });
-      const r = new THREE.Mesh(new THREE.PlaneGeometry(1.6 + Math.random() * 2.5, 34), m);
-      r.position.set(-14 + i * 4.5 + Math.random() * 2, 4, -6 - Math.random() * 6);
+      const r = new THREE.Mesh(new THREE.PlaneGeometry(1.6 + Math.random() * 2.8, 40), m);
+      r.position.set(-16 + i * 4.6 + Math.random() * 2, 4, -8 - Math.random() * 6);
       r.rotation.z = 0.42 + Math.random() * 0.08;
       rays.push(r);
       scene.add(r);
     }
 
-    // Hero crystal
-    const crystal = new THREE.Mesh(
-      rockGeometry(1.45, 1, 0.32, 11),
-      new THREE.MeshPhysicalMaterial({
-        color: 0xb8cce6,
-        metalness: 0.15,
-        roughness: 0.22,
-        thickness: 2.2,
-        ior: 1.6,
-        clearcoat: 1,
-        clearcoatRoughness: 0.05,
-        iridescence: 0.7,
-        iridescenceIOR: 1.4,
-        envMapIntensity: 2.2,
-        transparent: true,
-        opacity: 0.6,
-      }),
-    );
-    crystal.position.set(0.2, -0.4, 3);
-    crystal.scale.set(1, 1.25, 1);
-    scene.add(crystal);
-
-    // Drifting rocks along the dive
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x1b2433, roughness: 0.6, metalness: 0.3 });
-    const rocks: { m: THREE.Mesh; spin: number }[] = [];
-    const rockSpots = [
-      [6.5, 3.2, -1, 0.55],
-      [10.5, 4.2, -4, 0.3],
-      [3.5, -22, -2, 1.1],
-      [-6, -40, -3, 0.8],
-      [5, -70, -2, 0.9],
-      [-4, -110, -4, 1.2],
-      [6, -150, -3, 0.7],
+    // Ice crystals: the hero one in front of the wordmark, then a field of them down the sunlight zone
+    const glow = glowTexture();
+    const iceMat = new THREE.MeshPhysicalMaterial({
+      color: 0x4e6584,
+      metalness: 0.2,
+      roughness: 0.12,
+      clearcoat: 1,
+      clearcoatRoughness: 0.06,
+      iridescence: 0.35,
+      iridescenceIOR: 1.35,
+      flatShading: true,
+      envMapIntensity: 1.1,
+      transparent: true,
+      opacity: 0.74,
+      depthWrite: false,
+    });
+    const darkIceMat = iceMat.clone();
+    darkIceMat.color.set(0x1a2333);
+    darkIceMat.opacity = 0.92;
+    darkIceMat.envMapIntensity = 0.9;
+    darkIceMat.depthWrite = true;
+    type Ice = { g: THREE.Group; spin: THREE.Vector3; baseY: number; bob: number };
+    const ices: Ice[] = [];
+    const ICE = [
+      // x, y, z, radius, stretch, glowing core?
+      [0.6, -0.4, 3, 1.5, 1.35, 1],
+      [6.5, 3.4, -3, 0.6, 1.2, 0],
+      [-1.5, -9, 1, 1.9, 1.3, 1],
+      [5.5, -11, -4, 0.8, 1.1, 0],
+      [3.2, -18, 3.5, 2.6, 0.75, 1],
+      [-6, -23, -3, 1.2, 1.2, 0],
+      [-0.5, -30, 2, 2.4, 1.1, 0],
+      [4.5, -36, 0, 1.8, 1.35, 1],
+      [-4.5, -42, 3, 2.2, 0.9, 0],
+      [2, -49, -1, 2.8, 1.2, 1],
+      [-3, -56, 4, 2.0, 1.25, 0],
+      [5, -61, -3, 1.4, 1.1, 1],
     ];
-    rockSpots.forEach(([x, y, z, s], i) => {
-      const m = new THREE.Mesh(rockGeometry(s, 1, 0.5, 31 + i * 13), rockMat);
-      m.position.set(x, y, z);
-      scene.add(m);
-      rocks.push({ m, spin: 0.1 + Math.random() * 0.2 });
+    ICE.forEach(([x, y, z, r, st, core], i) => {
+      const grp = new THREE.Group();
+      const mesh = new THREE.Mesh(crystalGeometry(r, 11 + i * 17, st), core ? iceMat : darkIceMat);
+      grp.add(mesh);
+      if (core) {
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.55 }));
+        sp.scale.set(r * 0.95, r * 1.15 * st, 1);
+        grp.add(sp);
+      }
+      grp.position.set(mobile ? x * 0.55 : x, y, z);
+      scene.add(grp);
+      ices.push({
+        g: grp,
+        spin: new THREE.Vector3((Math.random() - 0.5) * 0.25, 0.1 + Math.random() * 0.2, (Math.random() - 0.5) * 0.15),
+        baseY: y,
+        bob: Math.random() * 6,
+      });
     });
 
-    // The megalodon: circles in the midnight zone, sweeping close past the viewer
-    const shark = createMegalodon(mobile ? 11 : 15);
+    // The megalodon — big, circling in the abyss
+    const SHARK_L = mobile ? 20 : 30;
+    const shark = createMegalodon(SHARK_L);
     scene.add(shark.root);
-    const ZONE_TOP = -0.16 * DEPTH;
-    const ZONE_BOT = -0.92 * DEPTH;
-    let sharkY = ZONE_TOP - 30;
-    let theta = Math.PI; // start far behind, on the left
+    let sharkY = WORLD.abyssTop - 45; // waits below, rises into view on the plunge
+    let theta = Math.PI * 0.85;
     const ahead = new THREE.Vector3();
-    // a cold "diver's torch" so the shark reads in the dark
-    const torch = new THREE.PointLight(0xbcd6ff, 0, 60, 1.2);
-    scene.add(torch);
+    const RX = mobile ? 14 : 24;
+    const RZ = mobile ? 20 : 26;
+    const CZ = mobile ? -18 : -27; // near edge of the loop passes in front of the camera
 
     // State
-    let target = 0;
     let current = 0;
     const mouse = { x: 0, y: 0, tx: 0, ty: 0 };
-    const readScroll = () => {
+    const progress = () => {
       const max = document.documentElement.scrollHeight - window.innerHeight;
-      target = max > 0 ? window.scrollY / max : 0;
+      return max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
     };
     const onMove = (e: PointerEvent) => {
       mouse.tx = (e.clientX / window.innerWidth) * 2 - 1;
@@ -267,15 +297,12 @@ export function Ocean() {
       const h = window.innerHeight;
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
-      camera.fov = w < 700 ? 60 : 45;
+      camera.fov = w < 700 ? 62 : 45;
       camera.updateProjectionMatrix();
-      const k = w < 700 ? 0.7 : 1;
-      crystal.scale.set(k, k * 1.25, k);
-      readScroll();
     };
     resize();
+    current = progress();
     window.addEventListener("resize", resize);
-    window.addEventListener("scroll", readScroll, { passive: true });
     window.addEventListener("pointermove", onMove, { passive: true });
 
     const clock = new THREE.Clock();
@@ -283,7 +310,10 @@ export function Ocean() {
     let visible = true;
     const onVis = () => {
       visible = !document.hidden;
-      if (visible) loop();
+      if (visible) {
+        clock.getDelta();
+        loop();
+      }
     };
     document.addEventListener("visibilitychange", onVis);
 
@@ -291,61 +321,78 @@ export function Ocean() {
       if (!visible) return;
       const dt = Math.min(clock.getDelta(), 0.05);
       const t = clock.elapsedTime * (reduced ? 0.2 : 1);
-      current += (target - current) * (1 - Math.pow(0.00001, dt));
+      // Lenis already smooths the scroll; follow it closely
+      current += (progress() - current) * (1 - Math.pow(0.00002, dt));
       mouse.x += (mouse.tx - mouse.x) * dt * 2;
       mouse.y += (mouse.ty - mouse.y) * dt * 2;
 
       const p = current;
-      camera.position.y = -p * DEPTH;
-      camera.position.x = mouse.x * 0.6;
-      camera.lookAt(mouse.x * 0.2, camera.position.y - mouse.y * 0.3, 0);
+      const m = depthAt(p);
+      const camY = camYAt(p);
+      camera.position.set(mouse.x * 0.7, camY, 14);
+      camera.lookAt(mouse.x * 0.2, camY - mouse.y * 0.3, 0);
 
+      // light: sunlit near the top, dark below
+      const sunny = 1 - smooth(-40, -110, camY); // 1 in the sunlight zone → 0 in the abyss
       snowMat.uniforms.uTime.value = t;
-      const rayOp = Math.max(0, 1 - p * 6) * 0.11;
       for (const r of rays) {
         r.material.uniforms.uTime.value = t;
-        r.material.uniforms.uOpacity.value = rayOp;
-        r.position.y = camera.position.y * 0.85 + 4;
+        r.material.uniforms.uOpacity.value = 0.13 * sunny;
+        r.position.y = camY + 6;
+        r.visible = sunny > 0.01;
       }
-      crystal.rotation.y = t * 0.18 + mouse.x * 0.4;
-      crystal.rotation.x = Math.sin(t * 0.3) * 0.25 + mouse.y * 0.2;
-      crystal.position.y = -0.4 + Math.sin(t * 0.6) * 0.15;
-      for (const r of rocks) {
-        r.m.rotation.x += r.spin * dt;
-        r.m.rotation.y += r.spin * 0.7 * dt;
+      sun.intensity = 2.6 * Math.max(0.12, sunny);
+      ambient.intensity = 0.25 + 0.45 * sunny;
+      fog.color.setRGB(0.01 * sunny, 0.03 * sunny, 0.06 * sunny + 0.004);
+      fog.density = 0.02 - (1 - sunny) * 0.009;
+
+      // ice
+      for (const ice of ices) {
+        const near = Math.abs(ice.g.position.y - camY) < 40;
+        ice.g.visible = near;
+        if (!near) continue;
+        ice.g.children[0].rotation.x += ice.spin.x * dt;
+        ice.g.children[0].rotation.y += ice.spin.y * dt + mouse.x * 0.002;
+        ice.g.children[0].rotation.z += ice.spin.z * dt;
+        ice.g.position.y = ice.baseY + Math.sin(t * 0.5 + ice.bob) * 0.25;
       }
-      // Megalodon path: an ellipse whose near edge passes ~8 units in front of the camera
-      const zoneY = Math.min(ZONE_TOP, Math.max(ZONE_BOT, camera.position.y));
-      sharkY += (zoneY - 1.5 - sharkY) * (1 - Math.pow(0.2, dt));
-      const prox0 = abyss.threat;
-      theta += dt * (0.32 + prox0 * 0.25) * (reduced ? 0.4 : 1);
-      const sx = Math.cos(theta) * 26;
-      const sz = -12 + Math.sin(theta) * 17;
-      const sy = sharkY + Math.sin(theta * 2) * 2.5;
+
+      // megalodon: follows the camera once it is in the abyss
+      const zoneY = Math.min(WORLD.abyssTop + 4, Math.max(WORLD.floor, camY));
+      const finaleOn = camY < WORLD.abyssBottom - 1; // at the finale it dives away, out of the call to action
+      const target = camY > WORLD.chaptersEnd - 20 ? WORLD.abyssTop - 45 : finaleOn ? camY - 60 : zoneY - 2;
+      sharkY += (target - sharkY) * (1 - Math.pow(0.15, dt));
+      theta += dt * (0.3 + abyss.threat * 0.12) * (reduced ? 0.4 : 1);
+      const sx = Math.cos(theta) * RX;
+      const sz = CZ + Math.sin(theta) * RZ;
+      const sy = sharkY + Math.sin(theta * 2) * 3;
       shark.root.position.set(sx, sy, sz);
-      ahead.set(-Math.sin(theta) * 26, Math.cos(theta * 2) * 5, Math.cos(theta) * 17).normalize();
+      ahead.set(-Math.sin(theta) * RX, Math.cos(theta * 2) * 6 * 0.5, Math.cos(theta) * RZ).normalize();
       shark.root.lookAt(ahead.add(shark.root.position));
-      shark.root.rotateZ(-Math.cos(theta) * 0.25); // bank into the turn
+      shark.root.rotateZ(-Math.cos(theta) * 0.22);
       const dist = shark.root.position.distanceTo(camera.position);
-      const threat = THREE.MathUtils.clamp(1 - (dist - 9) / 18, 0, 1);
-      shark.update(dt, threat, THREE.MathUtils.smoothstep(threat, 0.15, 0.7));
-      ambient.intensity = 0.6 * (1 - p * 0.55) * (1 - threat * 0.5);
-      rim.intensity = 30 * (1 - threat * 0.85);
-      abyss.depth = p;
+      const threat = THREE.MathUtils.clamp(1 - (dist - SHARK_L * 0.45) / (SHARK_L * 0.9), 0, 1);
+      shark.update(dt, threat);
+      abyss.depth = Math.min(1, m / 4800);
       abyss.threat = threat;
+
+      deep.intensity = (1 - sunny) * 1.8;
+      deep.position.set(-6, camY + 20, 10);
+      deep.target.position.set(0, camY, -10);
+      sharkLight.position.set(sx, sy + SHARK_L * 0.35, sz + 6);
+      sharkLight.intensity = (1 - sunny) * 42;
       torch.position.copy(camera.position);
-      torch.intensity = THREE.MathUtils.smoothstep(p, 0.12, 0.4) * 9 * (1 - abyss.threat * 0.5);
+      torch.intensity = (1 - sunny) * 14 * (1 - threat * 0.4);
+      rim.position.set(6, camY - 2, 6);
+      rim.intensity = 30 * (1 - threat * 0.8);
+      ambient.intensity *= 1 - threat * 0.4;
       if (threat > 0.5 && !reduced) {
-        const k = (threat - 0.5) * 0.18;
+        const k = (threat - 0.5) * 0.2;
         camera.position.x += (Math.random() - 0.5) * k;
         camera.position.y += (Math.random() - 0.5) * k;
       }
 
-      rim.position.y = camera.position.y - 2;
-      sun.intensity = 2.4 * Math.max(0.15, 1 - p * 3);
-      (scene.fog as THREE.FogExp2).color.setRGB(0.008, 0.02 * (1 - p), 0.047 * (1 - p * 0.8));
-
-      const [top, bot] = seaAt(p);
+      const [top, bot] = seaAt(m);
       sea.style.background = `linear-gradient(180deg, ${top} 0%, ${bot} 100%)`;
 
       renderer.render(scene, camera);
@@ -356,19 +403,19 @@ export function Ocean() {
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
-      window.removeEventListener("scroll", readScroll);
       window.removeEventListener("pointermove", onMove);
       document.removeEventListener("visibilitychange", onVis);
-      scene.traverse((o) => {
-        const m = o as THREE.Mesh;
-        m.geometry?.dispose();
-        const mat = m.material as THREE.Material | THREE.Material[] | undefined;
-        if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
-        else mat?.dispose();
-      });
       shark.dispose();
       abyss.depth = 0;
       abyss.threat = 0;
+      scene.traverse((o) => {
+        const mm = o as THREE.Mesh;
+        mm.geometry?.dispose();
+        const mat = mm.material as THREE.Material | THREE.Material[] | undefined;
+        if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
+        else mat?.dispose();
+      });
+      glow.dispose();
       env.dispose();
       pmrem.dispose();
       renderer.dispose();
